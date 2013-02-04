@@ -1,10 +1,17 @@
 require 'blather/client'
 require 'optparse'
+require 'yaml'
+
+Blather.logger = Logger.new $stdout
+Blather.logger.level = Logger::DEBUG
+
+@reconnection_attempts = 0
 
 if File.exists?("config.yml")
   config = YAML.load_file("config.yml")
 
-  @jabber_id = config["connection"]["node"] || nil
+  @jabber_id = config["connection"]["jabber_id"] || nil
+  @resource = config["connection"]["resource"] || nil
   @password = config["connection"]["password"] || nil
   @host = config["connection"]["host"] || nil
   @port = config["connection"]["port"] || nil
@@ -12,49 +19,21 @@ if File.exists?("config.yml")
   @connect_timeout = config["connection"]["connect_timeout"] || nil
 end
 
-OptionParser.new do |o|
-  o.on('-j', '--jabber_id JABBER_ID', 'use JABBER_ID to connect') do |jabber_id|
-    @jabber_id = jabber_id
-  end
-
-  o.on('-p', '--password PASSWORD', 'use PASSWORD to authenticate') do |password|
-    @password = password
-  end
-
-  o.on('-h', '--host HOST', 'connect to HOST') do |host|
-    @host = host
-  end
-
-  o.on('--port PORT', 'connect to HOST on PORT') do |port|
-    @port = port
-  end
-
-  o.on('-c', '--certs CERTS', 'authenticate using CERTS') do |certs|
-    @certs = certs
-  end
-
-  o.on('-t', '--timeout TIMEOUT', 'timeout connection attempt after TIMEOUT seconds') do |timeout|
-    @connect_timeout = timeout
-  end
-
-  o.separator ""
-  o.separator "HELP"
-
-  o.on_tail("-h", , "--h", "--help", "Show this message") do
-    puts o
-    exit
-  end
-end.parse!
-
-setup @jabber_id, @password, @host, @port, @certs, @connect_timeout
+setup "#{@jabber_id}/#{@resource}", @password, @host, @port, @certs, @connect_timeout
 
 when_ready do
+  puts "Client Connected!"
   # initialize on initial connection
+  @reconnection_attempts = 0
   write_to_stream "kirillian's test XMPP bot SUCCESSFUL!!!"
 end
 
 disconnected do
-  client.reconnect
+  reconnect_time = ((2**@reconnection_attempts) - 1) > 60 ? 60 : ((2**@reconnection_attempts) - 1)
+  puts "Client Disconnected...Attempting reconnect in #{reconnect_time.to_s}s"
+  @reconnection_attempts += 1
+  sleep(reconnect_time)
+  client.connect
 end
 
 client.register_handler(:ready)
@@ -68,4 +47,12 @@ end
 # Log message
 message :chat?, :body do |message|
   puts message.inspect
+end
+
+stanza_error do |error|
+  puts "ERROR MESSAGE: #{error.inspect}"
+end
+
+stream_error do |error|
+  puts "STREAM ERROR MESSAGE: #{error.inspect}"
 end
